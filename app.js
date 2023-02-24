@@ -1,27 +1,43 @@
-require('dotenv').config();
+
 const express = require("express");
 const bodyParser = require("body-parser");
 const mongoose = require("mongoose");
-var encrypt = require('mongoose-encryption');
+const session = require("express-session");
+const passport = require("passport");
+const LocalStrategy = require("passport-local").Strategy;
+const passportLocalMongoose = require('passport-local-mongoose');
+
 const app = express();
+app.set('view engine', 'ejs');
+app.use(bodyParser.urlencoded({extended: true}));
+app.use(express.static("public"));
+
+app.use(session({
+    secret: 'keyboard cat',
+    resave: false,
+    saveUninitialized: true,
+    cookie: { secure: true }
+  }));
+
+  app.use(passport.initialize());
+  app.use(passport.session());
 
 mongoose.connect("mongodb://127.0.0.1:27017/secretDB", {useNewUrlParser: true});
 mongoose.set("strictQuery",true);
-
-app.set('view engine', 'ejs');
-
-app.use(bodyParser.urlencoded({extended: true}));
-app.use(express.static("public"));
 
 const secretSchema = new mongoose.Schema({
     email : String,
     password : String
 });
-
-
-secretSchema.plugin(encrypt, { secret: process.env.SECRET, encryptedFields : ["password"]});
+secretSchema.plugin(passportLocalMongoose);
 
 const Secret = mongoose.model("Secret",secretSchema);
+
+
+passport.use(new LocalStrategy(Secret.authenticate()));
+passport.use(Secret.createStrategy());
+passport.serializeUser(Secret.serializeUser());
+passport.deserializeUser(Secret.deserializeUser());
 
 app.get("/",function(req,res){
     res.render("home");
@@ -35,51 +51,31 @@ app.get("/register",function(req,res){
     res.render("register");
 });
 
+app.get("/secrets",function(req,res){
+    res.render("secrets");
+});
+
+app.get("/logout",function(req,res){
+    req.logout;
+    res.redirect("/");
+});
 
 app.post("/register",function(req,res){
-    const newSecret = new Secret({
-        email : req.body.username,
-        password : req.body.password
-    });
-    const username = req.body.username;
-    const password = req.body.password;
-    Secret.findOne({email:username,password:password},function(err,found){
-        if(!err){
-            if(found){
-                if(found.email=== username){
-                    res.redirect("/register");
-                }
-                }
-                else{
-                    newSecret.save(function(err){
-                        if(!err){
-                            res.redirect("/login");
-                        }
-                    });
-                }
-        }
-    });
-});
-
-app.post("/login",function(req,res){
-    const username = req.body.username;
-    const password = req.body.password;
-    Secret.findOne({email:username},function(err,found){
-        if(err){
-            res.send("not registered");
+    Secret.register(new Secret({username:req.body.username}),req.body.password, function(err, user) {
+        if (err) {
+            console.log(err);
+            res.redirect("/register");
         }
         else{
-            if(found){
-                if(found.password === password){
-                    res.render("secrets");
-                }
-                else{
-                    res.redirect("/");
-                }
-            }
+            res.redirect("/login");
         }
-    });
+      });
 });
+
+app.post("/login",passport.authenticate("local",{
+    successRedirect:"/secrets",
+    failureRedirect:"/login"
+}));
 
 
 app.listen("5000",function(){
